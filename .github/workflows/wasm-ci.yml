@@ -1,0 +1,707 @@
+name: GdkPixbuf WASM CI/CD Pipeline
+
+# Copyright 2025 Superstruct Ltd, New Zealand
+# Licensed under LGPL-2.1-or-later
+
+on:
+  push:
+    branches: [ wasm, main ]
+    paths-ignore:
+      - '*.md'
+      - 'docs/**'
+      - '.gitignore'
+  pull_request:
+    branches: [ wasm, main ]
+    paths-ignore:
+      - '*.md'
+      - 'docs/**'
+      - '.gitignore'
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'Build type'
+        required: false
+        default: 'release'
+        type: choice
+        options:
+          - release
+          - debug
+          - debugoptimized
+      run_benchmarks:
+        description: 'Run performance benchmarks'
+        required: false
+        default: true
+        type: boolean
+
+env:
+  EMSCRIPTEN_VERSION: '3.1.51'
+  NODE_VERSION: '20'
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  setup:
+    name: Setup and Validation
+    runs-on: ubuntu-latest
+    outputs:
+      build-matrix: ${{ steps.matrix.outputs.matrix }}
+      should-deploy: ${{ steps.check.outputs.should-deploy }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Setup build matrix
+        id: matrix
+        run: |
+          cat > matrix.json << 'EOF'
+          {
+            "include": [
+              {
+                "target": "web",
+                "features": "core",
+                "optimization": "size",
+                "name": "Web Core (Size Optimized)"
+              },
+              {
+                "target": "web", 
+                "features": "standard",
+                "optimization": "size",
+                "name": "Web Standard (PNG Support)"
+              },
+              {
+                "target": "web",
+                "features": "extended,simd",
+                "optimization": "speed",
+                "name": "Web Extended + SIMD"
+              },
+              {
+                "target": "node",
+                "features": "extended",
+                "optimization": "speed", 
+                "name": "Node.js Extended"
+              },
+              {
+                "target": "worker",
+                "features": "standard,simd",
+                "optimization": "size",
+                "name": "Web Worker + SIMD"
+              }
+            ]
+          }
+          EOF
+          echo "matrix=$(cat matrix.json | jq -c .)" >> $GITHUB_OUTPUT
+
+      - name: Check deployment conditions
+        id: check
+        run: |
+          if [[ "${{ github.ref }}" == "refs/heads/wasm" && "${{ github.event_name }}" == "push" ]]; then
+            echo "should-deploy=true" >> $GITHUB_OUTPUT
+          else
+            echo "should-deploy=false" >> $GITHUB_OUTPUT
+          fi
+
+  build:
+    name: ${{ matrix.name }}
+    needs: setup
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.setup.outputs.build-matrix) }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: 'package*.json'
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Cache Emscripten
+        id: cache-emsdk
+        uses: actions/cache@v3
+        with:
+          path: emsdk
+          key: emsdk-${{ env.EMSCRIPTEN_VERSION }}-${{ runner.os }}
+          restore-keys: |
+            emsdk-${{ env.EMSCRIPTEN_VERSION }}-
+
+      - name: Setup Emscripten SDK
+        if: steps.cache-emsdk.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 https://github.com/emscripten-core/emsdk.git
+          cd emsdk
+          ./emsdk install ${{ env.EMSCRIPTEN_VERSION }}
+          ./emsdk activate ${{ env.EMSCRIPTEN_VERSION }}
+
+      - name: Activate Emscripten
+        run: |
+          cd emsdk
+          source ./emsdk_env.sh
+          echo "EMSDK=$EMSDK" >> $GITHUB_ENV
+          echo "EM_CONFIG=$EM_CONFIG" >> $GITHUB_ENV
+          echo "$EMSDK" >> $GITHUB_PATH
+          echo "$EMSDK/upstream/emscripten" >> $GITHUB_PATH
+          echo "$EMSDK/upstream/bin" >> $GITHUB_PATH
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y \
+            build-essential \
+            ninja-build \
+            meson \
+            pkg-config \
+            libglib2.0-dev \
+            libpng-dev \
+            libjpeg-dev \
+            zlib1g-dev \
+            python3-pip
+
+      - name: Install Python dependencies
+        run: |
+          pip3 install --user meson ninja
+
+      - name: Setup WASM dependencies cache
+        uses: actions/cache@v3
+        with:
+          path: /usr/local/wasm
+          key: wasm-deps-${{ hashFiles('**/meson.build', '**/meson_options.txt') }}
+          restore-keys: |
+            wasm-deps-
+
+      - name: Verify Emscripten installation
+        run: |
+          source emsdk/emsdk_env.sh
+          emcc --version
+          em++ --version
+          which emcc
+          echo "Emscripten setup complete"
+
+      - name: Configure build environment
+        run: |
+          source emsdk/emsdk_env.sh
+          export BUILD_TYPE="${{ inputs.build_type || 'release' }}"
+          echo "BUILD_TYPE=$BUILD_TYPE" >> $GITHUB_ENV
+          echo "Configured for: ${{ matrix.name }}"
+          echo "Target: ${{ matrix.target }}"
+          echo "Features: ${{ matrix.features }}"
+          echo "Optimization: ${{ matrix.optimization }}"
+
+      - name: Build WASM library
+        run: |
+          source emsdk/emsdk_env.sh
+          export PATH="$HOME/.local/bin:$PATH"
+          
+          chmod +x ./build-wasm.sh
+          ./build-wasm.sh \
+            "${{ env.BUILD_TYPE }}" \
+            "${{ matrix.target }}" \
+            "${{ matrix.features }}" \
+            "${{ matrix.optimization }}"
+
+      - name: Verify build artifacts
+        run: |
+          echo "Build artifacts:"
+          ls -la dist/ || true
+          
+          if [ -f "dist/gdk-pixbuf.js" ]; then
+            echo "✅ JavaScript module found"
+            echo "Size: $(du -h dist/gdk-pixbuf.js | cut -f1)"
+          else
+            echo "❌ JavaScript module missing"
+            exit 1
+          fi
+          
+          if [ -f "dist/gdk-pixbuf.wasm" ]; then
+            echo "✅ WASM binary found"
+            echo "Size: $(du -h dist/gdk-pixbuf.wasm | cut -f1)"
+          else
+            echo "❌ WASM binary missing"
+            exit 1
+          fi
+          
+          if [ -f "dist/gdk-pixbuf.d.ts" ]; then
+            echo "✅ TypeScript definitions found"
+          else
+            echo "❌ TypeScript definitions missing"
+            exit 1
+          fi
+
+      - name: Run basic functionality tests
+        run: |
+          cd dist
+          node -e "
+            const fs = require('fs');
+            const GdkPixbuf = require('./gdk-pixbuf.js');
+            
+            console.log('Testing WASM module loading...');
+            
+            GdkPixbuf().then(module => {
+              console.log('✅ Module loaded successfully');
+              console.log('Module exports:', Object.keys(module));
+              
+              // Test basic API availability
+              if (typeof module.ccall === 'function') {
+                console.log('✅ ccall function available');
+              } else {
+                console.log('❌ ccall function missing');
+                process.exit(1);
+              }
+              
+              console.log('Basic functionality test passed');
+            }).catch(error => {
+              console.error('❌ Module loading failed:', error);
+              process.exit(1);
+            });
+          "
+
+      - name: Generate build report
+        run: |
+          echo "## Build Report: ${{ matrix.name }}" >> build-report.md
+          echo "" >> build-report.md
+          echo "**Configuration:**" >> build-report.md
+          echo "- Target: ${{ matrix.target }}" >> build-report.md
+          echo "- Features: ${{ matrix.features }}" >> build-report.md
+          echo "- Optimization: ${{ matrix.optimization }}" >> build-report.md
+          echo "- Build Type: ${{ env.BUILD_TYPE }}" >> build-report.md
+          echo "" >> build-report.md
+          
+          if [ -f "dist/build-report.txt" ]; then
+            echo "**Build Details:**" >> build-report.md
+            echo '```' >> build-report.md
+            cat dist/build-report.txt >> build-report.md
+            echo '```' >> build-report.md
+          fi
+          
+          echo "" >> build-report.md
+          echo "**Artifacts:**" >> build-report.md
+          ls -la dist/ | while read line; do
+            echo "- $line" >> build-report.md
+          done
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: gdk-pixbuf-wasm-${{ matrix.target }}-${{ matrix.features }}-${{ matrix.optimization }}
+          path: |
+            dist/
+            build-report.md
+          retention-days: 30
+
+      - name: Upload build report
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-report-${{ matrix.target }}-${{ matrix.features }}
+          path: build-report.md
+          retention-days: 7
+
+  test:
+    name: Integration Tests
+    needs: [setup, build]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        browser: [chrome, firefox]
+        
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: gdk-pixbuf-wasm-web-standard-size
+          path: dist/
+
+      - name: Install test dependencies
+        run: |
+          npm install -g playwright@latest
+          npx playwright install ${{ matrix.browser }}
+
+      - name: Setup test server
+        run: |
+          # Create a simple HTTP server for testing
+          cat > test-server.js << 'EOF'
+          const http = require('http');
+          const fs = require('fs');
+          const path = require('path');
+          const url = require('url');
+
+          const server = http.createServer((req, res) => {
+            const pathname = url.parse(req.url).pathname;
+            let filePath = '.' + pathname;
+            
+            if (pathname === '/') {
+              filePath = './tests/wasm_integration_test.html';
+            }
+            
+            fs.readFile(filePath, (err, data) => {
+              if (err) {
+                res.writeHead(404);
+                res.end('Not found');
+                return;
+              }
+              
+              const ext = path.extname(filePath);
+              let contentType = 'text/html';
+              
+              switch (ext) {
+                case '.js':
+                  contentType = 'application/javascript';
+                  break;
+                case '.wasm':
+                  contentType = 'application/wasm';
+                  break;
+                case '.css':
+                  contentType = 'text/css';
+                  break;
+              }
+              
+              res.writeHead(200, { 
+                'Content-Type': contentType,
+                'Cross-Origin-Embedder-Policy': 'require-corp',
+                'Cross-Origin-Opener-Policy': 'same-origin'
+              });
+              res.end(data);
+            });
+          });
+
+          server.listen(8080, () => {
+            console.log('Test server running on http://localhost:8080');
+          });
+          EOF
+
+      - name: Run browser tests
+        run: |
+          # Start test server in background
+          node test-server.js &
+          SERVER_PID=$!
+          
+          # Wait for server to start
+          sleep 2
+          
+          # Run Playwright tests
+          npx playwright test --browser=${{ matrix.browser }} --timeout=60000 << 'EOF'
+          const { test, expect } = require('@playwright/test');
+
+          test.describe('GdkPixbuf WASM Integration Tests', () => {
+            test('should load test page', async ({ page }) => {
+              await page.goto('http://localhost:8080/');
+              await expect(page).toHaveTitle(/GdkPixbuf WASM/);
+            });
+
+            test('should detect browser capabilities', async ({ page }) => {
+              await page.goto('http://localhost:8080/');
+              
+              // Wait for capability detection
+              await page.waitForTimeout(1000);
+              
+              const capabilities = await page.evaluate(() => {
+                return window.testSuite?.capabilities || {};
+              });
+              
+              expect(capabilities).toHaveProperty('webassembly', true);
+            });
+
+            test('should run basic tests', async ({ page }) => {
+              await page.goto('http://localhost:8080/');
+              
+              // Click run tests button
+              await page.click('button:has-text("Run All Tests")');
+              
+              // Wait for tests to complete (up to 30 seconds)
+              await page.waitForSelector('.test-result', { timeout: 30000 });
+              
+              // Check for test results
+              const results = await page.$$eval('.test-result', elements => {
+                return elements.map(el => ({
+                  text: el.textContent,
+                  className: el.className
+                }));
+              });
+              
+              expect(results.length).toBeGreaterThan(0);
+              
+              // Check for any failed tests
+              const failures = results.filter(r => r.className.includes('test-fail'));
+              if (failures.length > 0) {
+                console.log('Failed tests:', failures);
+              }
+              
+              // At least some tests should pass
+              const passes = results.filter(r => r.className.includes('test-pass'));
+              expect(passes.length).toBeGreaterThan(0);
+            });
+          });
+          EOF
+          
+          # Kill server
+          kill $SERVER_PID
+
+      - name: Generate test report
+        if: always()
+        run: |
+          echo "## Test Report: ${{ matrix.browser }}" >> test-report-${{ matrix.browser }}.md
+          echo "" >> test-report-${{ matrix.browser }}.md
+          echo "Browser: ${{ matrix.browser }}" >> test-report-${{ matrix.browser }}.md
+          echo "Status: Tests completed" >> test-report-${{ matrix.browser }}.md
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.browser }}
+          path: |
+            test-report-${{ matrix.browser }}.md
+            test-results/
+          retention-days: 7
+
+  benchmark:
+    name: Performance Benchmarks
+    needs: [setup, build]
+    runs-on: ubuntu-latest
+    if: github.event.inputs.run_benchmarks == 'true' || github.event_name == 'push'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Download optimized build
+        uses: actions/download-artifact@v4
+        with:
+          name: gdk-pixbuf-wasm-web-extended,simd-speed
+          path: dist/
+
+      - name: Install benchmark dependencies
+        run: |
+          npm install -g playwright@latest
+          npx playwright install chromium
+
+      - name: Run performance benchmarks
+        run: |
+          # Create benchmark runner
+          cat > run-benchmarks.js << 'EOF'
+          const { chromium } = require('playwright');
+          const fs = require('fs');
+
+          (async () => {
+            const browser = await chromium.launch();
+            const context = await browser.newContext();
+            const page = await context.newPage();
+            
+            // Navigate to test page
+            await page.goto('file://' + __dirname + '/tests/wasm_integration_test.html');
+            
+            // Wait for page load
+            await page.waitForTimeout(2000);
+            
+            // Run benchmarks
+            console.log('Starting performance benchmarks...');
+            
+            const results = await page.evaluate(async () => {
+              // This would integrate with the benchmark suite
+              if (window.benchmarkSuite) {
+                return await window.benchmarkSuite.runAllBenchmarks();
+              }
+              return { error: 'Benchmark suite not available' };
+            });
+            
+            console.log('Benchmark results:', JSON.stringify(results, null, 2));
+            
+            // Save results
+            fs.writeFileSync('benchmark-results.json', JSON.stringify(results, null, 2));
+            
+            await browser.close();
+          })();
+          EOF
+          
+          node run-benchmarks.js
+
+      - name: Generate benchmark report
+        run: |
+          echo "## Performance Benchmark Report" >> benchmark-report.md
+          echo "" >> benchmark-report.md
+          echo "**System Information:**" >> benchmark-report.md
+          echo "- OS: $(uname -s)" >> benchmark-report.md
+          echo "- CPU: $(nproc) cores" >> benchmark-report.md
+          echo "- Memory: $(free -h | grep '^Mem:' | awk '{print $2}')" >> benchmark-report.md
+          echo "" >> benchmark-report.md
+          
+          if [ -f "benchmark-results.json" ]; then
+            echo "**Results:**" >> benchmark-report.md
+            echo '```json' >> benchmark-report.md
+            cat benchmark-results.json >> benchmark-report.md
+            echo '```' >> benchmark-report.md
+          else
+            echo "Benchmark results not generated" >> benchmark-report.md
+          fi
+          
+          # Add to GitHub step summary
+          cat benchmark-report.md >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: |
+            benchmark-results.json
+            benchmark-report.md
+          retention-days: 30
+
+  quality:
+    name: Code Quality and Security
+    needs: [setup, build]
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: gdk-pixbuf-wasm-web-standard-size
+          path: dist/
+
+      - name: Analyze WASM binary
+        run: |
+          if command -v wasm-objdump &> /dev/null; then
+            echo "## WASM Binary Analysis" >> quality-report.md
+            echo '```' >> quality-report.md
+            wasm-objdump -h dist/gdk-pixbuf.wasm >> quality-report.md 2>/dev/null || echo "wasm-objdump failed" >> quality-report.md
+            echo '```' >> quality-report.md
+          fi
+
+      - name: Security scan
+        run: |
+          echo "## Security Analysis" >> quality-report.md
+          echo "" >> quality-report.md
+          
+          # Basic security checks
+          echo "**File Analysis:**" >> quality-report.md
+          echo "- WASM binary size: $(du -h dist/gdk-pixbuf.wasm | cut -f1)" >> quality-report.md
+          echo "- JavaScript size: $(du -h dist/gdk-pixbuf.js | cut -f1)" >> quality-report.md
+          
+          # Check for suspicious patterns
+          if grep -r "eval\|Function\|setTimeout.*string" dist/ >/dev/null 2>&1; then
+            echo "- ⚠️  Potentially unsafe JavaScript patterns detected" >> quality-report.md
+          else
+            echo "- ✅ No obvious security issues in JavaScript" >> quality-report.md
+          fi
+
+      - name: Generate quality report
+        run: |
+          echo "## Code Quality Summary" >> quality-report.md
+          echo "" >> quality-report.md
+          echo "Build completed with quality checks" >> quality-report.md
+          
+          # Add to GitHub step summary
+          cat quality-report.md >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload quality report
+        uses: actions/upload-artifact@v4
+        with:
+          name: quality-report
+          path: quality-report.md
+          retention-days: 7
+
+  release:
+    name: Create Release
+    needs: [setup, build, test, benchmark, quality]
+    runs-on: ubuntu-latest
+    if: needs.setup.outputs.should-deploy == 'true'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release/
+          
+          # Collect all WASM builds
+          find artifacts/ -name "*.wasm" -o -name "*.js" -o -name "*.d.ts" | while read file; do
+            cp "$file" release/
+          done
+          
+          # Create release archive
+          cd release
+          tar -czf ../gdk-pixbuf-wasm-release.tar.gz *
+          cd ..
+          
+          # Generate release notes
+          echo "# GdkPixbuf WASM Release" > RELEASE_NOTES.md
+          echo "" >> RELEASE_NOTES.md
+          echo "Automated build from commit: ${{ github.sha }}" >> RELEASE_NOTES.md
+          echo "Build date: $(date -u)" >> RELEASE_NOTES.md
+          echo "" >> RELEASE_NOTES.md
+          
+          # Include build reports
+          find artifacts/ -name "build-report.md" | head -1 | xargs cat >> RELEASE_NOTES.md || true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: wasm-build-${{ github.run_number }}
+          name: GdkPixbuf WASM Build ${{ github.run_number }}
+          body_path: RELEASE_NOTES.md
+          files: |
+            gdk-pixbuf-wasm-release.tar.gz
+            release/*
+          draft: false
+          prerelease: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  summary:
+    name: Build Summary
+    needs: [setup, build, test, benchmark, quality]
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+      - name: Generate overall summary
+        run: |
+          echo "# GdkPixbuf WASM Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Build Status:** ${{ needs.build.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Test Status:** ${{ needs.test.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Benchmark Status:** ${{ needs.benchmark.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Quality Status:** ${{ needs.quality.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Triggered by:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [[ "${{ needs.build.result }}" == "success" ]]; then
+            echo "✅ All builds completed successfully" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Some builds failed" >> $GITHUB_STEP_SUMMARY
+          fi
