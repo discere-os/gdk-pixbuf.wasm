@@ -1,3 +1,4 @@
+/*.log
 /subprojects/*/
 
 # WASM build artifacts

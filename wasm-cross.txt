@@ -18,6 +18,7 @@ endian = 'little'
 [properties]
 sizeof_void_p = 4
 sizeof_wchar_t = 4
+pkg_config_libdir = '/home/isaac/src/discere/discere-nucleus/client/emscripten/glib.wasm/install/lib/pkgconfig:/home/isaac/.emscripten_cache/sysroot/share/pkgconfig:/home/isaac/.emscripten_cache/sysroot/lib/pkgconfig'
 
 [built-in options]
 c_std = 'gnu99'

@@ -93,7 +93,21 @@ setup_environment() {
 # Configure build
 configure_build() {
     log "Configuring Meson build..."
-    
+
+    # Set up PKG_CONFIG paths for WASM dependencies
+    local GLIB_ROOT="$(cd ../glib.wasm && pwd)/install"
+    local CAIRO_ROOT="$(cd ../cairo.wasm && pwd)/install"
+    local FONTCONFIG_ROOT="$(cd ../fontconfig.wasm && pwd)/install"
+    local FREETYPE_ROOT="$(cd ../freetype.wasm && pwd)/install"
+    local LIBPNG_ROOT="$(cd ../libpng.wasm && pwd)/install"
+    local ZLIB_ROOT="$(cd ../zlib.wasm && pwd)/install"
+
+    # Set PKG_CONFIG_LIBDIR to find WASM libraries instead of system libraries
+    export PKG_CONFIG_LIBDIR="${GLIB_ROOT}/lib/pkgconfig:${CAIRO_ROOT}/lib/pkgconfig:${FONTCONFIG_ROOT}/lib/pkgconfig:${FREETYPE_ROOT}/lib/pkgconfig:${LIBPNG_ROOT}/lib/pkgconfig:${ZLIB_ROOT}/lib/pkgconfig"
+    unset PKG_CONFIG_PATH
+
+    log "PKG_CONFIG_LIBDIR set to use WASM dependencies"
+
     # Remove existing build directory
     rm -rf "$BUILD_DIR"
     
@@ -126,11 +140,11 @@ configure_build() {
         -Dgif=enabled \
         -Dothers=enabled \
         -Dtests=false \
-        -Dintrospection=false \
+        -Dintrospection=disabled \
         -Ddocumentation=false \
         -Dman=false \
-        -Dthumbnailer=false \
-        -Drelocatable=true \
+        -Dthumbnailer=disabled \
+        -Drelocatable=false \
         -Dgio_sniffing=false \
         -Dinstalled_tests=false
     
