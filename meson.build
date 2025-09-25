@@ -423,6 +423,7 @@ glib_compile_resources = find_program('glib-compile-resources')
 gnome = import('gnome')
 
 subdir('gdk-pixbuf')
+subdir('wasm')
 
 # i18n
 subdir('po')
