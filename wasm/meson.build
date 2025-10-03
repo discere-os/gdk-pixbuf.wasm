@@ -28,6 +28,7 @@ gdkp_side_link_args = [
   '-fPIC',
   '-O3',
   '-flto',
+  '-sERROR_ON_UNDEFINED_SYMBOLS=0',  # Host provides dependencies (glib, png, jpeg, tiff, webp, etc.)
   '-sEXPORTED_FUNCTIONS=["_gdk_pixbuf_wasm_version"]',
 ]
 
@@ -36,6 +37,7 @@ shared_module(
   files('gdk_pixbuf_wasm_side.c'),
   dependencies: [gdkpixbuf_dep],
   name_prefix: '',
+  name_suffix: 'wasm',
   c_args: gdkp_wasm_cargs,
   link_args: gdkp_side_link_args,
   install: true,
