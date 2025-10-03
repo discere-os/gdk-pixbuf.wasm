@@ -1,0 +1,65 @@
+{
+  "wasm:glib": {
+    "version": "^2.78.0",
+    "symbols": {
+      "required": [
+        "g_malloc",
+        "g_free",
+        "g_strdup",
+        "g_object_new",
+        "g_object_unref"
+      ]
+    },
+    "loading": "eager",
+    "fallback": null
+  },
+  "wasm:libpng": {
+    "version": "^1.6.0",
+    "symbols": {
+      "required": [
+        "png_create_read_struct",
+        "png_create_write_struct",
+        "png_read_image",
+        "png_write_image"
+      ]
+    },
+    "loading": "lazy",
+    "fallback": null
+  },
+  "wasm:libjpeg": {
+    "version": "^3.0.0",
+    "symbols": {
+      "required": [
+        "jpeg_CreateCompress",
+        "jpeg_CreateDecompress",
+        "jpeg_read_scanlines",
+        "jpeg_write_scanlines"
+      ]
+    },
+    "loading": "lazy",
+    "fallback": null
+  },
+  "wasm:libtiff": {
+    "version": "^4.7.0",
+    "symbols": {
+      "required": [
+        "TIFFOpen",
+        "TIFFClose",
+        "TIFFReadRGBAImage"
+      ]
+    },
+    "loading": "lazy",
+    "fallback": null
+  },
+  "wasm:libwebp": {
+    "version": "^1.4.0",
+    "symbols": {
+      "required": [
+        "WebPDecode",
+        "WebPEncode"
+      ]
+    },
+    "loading": "lazy",
+    "fallback": null
+  }
+}
