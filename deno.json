@@ -6,9 +6,10 @@
     "./main": "./install/wasm/gdk-pixbuf-main.js"
   },
   "tasks": {
-    "build:main:meson": "meson setup build-main --cross-file=scripts/emscripten.cross -Dbuildtype=release --prefix=$PWD/install -Dlibdir=wasm -Dbindir=wasm --force-fallback-for=glib,libffi,zlib -Dglib:xattr=false -Dglib:tests=false && meson compile -C build-main gdk-pixbuf-main && meson install -C build-main",
-    "build:side:meson": "meson setup build-side --cross-file=scripts/emscripten.cross -Dbuildtype=release --prefix=$PWD/install -Dlibdir=wasm -Dbindir=wasm --force-fallback-for=glib,libffi,zlib -Dglib:xattr=false -Dglib:tests=false -Dc_args='-msimd128 -DGOBJECT_SIDE_MODULE=1' -Dc_link_args='-sSIDE_MODULE=2 -fPIC -O3 -flto -sERROR_ON_UNDEFINED_SYMBOLS=0' && meson compile -C build-side gdk-pixbuf-side && meson install -C build-side && python3 scripts/postinstall.py $PWD/install",
+    "build:main:meson": "EMCC_CFLAGS='-pthread -sPROXY_TO_PTHREAD' LDFLAGS='-lwebsocket.js -sPROXY_POSIX_SOCKETS -pthread -sPROXY_TO_PTHREAD' meson setup build-main --cross-file=scripts/emscripten.cross -Dbuildtype=release --prefix=$PWD/install -Dlibdir=wasm -Dbindir=wasm --force-fallback-for=glib,libffi,zlib -Dglib:xattr=false -Dglib:tests=false && meson compile -C build-main gdk-pixbuf-main && meson install -C build-main",
+    "build:side:meson": "EMCC_CFLAGS='-pthread -sPROXY_TO_PTHREAD' LDFLAGS='-lwebsocket.js -sPROXY_POSIX_SOCKETS -pthread -sPROXY_TO_PTHREAD' meson setup build-side --cross-file=scripts/emscripten.cross -Dbuildtype=release --prefix=$PWD/install -Dlibdir=wasm -Dbindir=wasm --force-fallback-for=glib,libffi,zlib -Dglib:xattr=false -Dglib:tests=false -Dc_args='-msimd128 -DGOBJECT_SIDE_MODULE=1 -pthread -sPROXY_TO_PTHREAD' -Dc_link_args='-sSIDE_MODULE=2 -fPIC -O3 -flto -sERROR_ON_UNDEFINED_SYMBOLS=0 -lwebsocket.js -sPROXY_POSIX_SOCKETS -pthread -sPROXY_TO_PTHREAD' && meson compile -C build-side gdk-pixbuf-side && meson install -C build-side && python3 scripts/postinstall.py $PWD/install",
     "build:wasm:meson": "deno task build:main:meson && deno task build:side:meson && deno task manifest",
-    "manifest": "deno run --allow-read --allow-write --allow-run ../../../../scripts/generate-wasm-manifest.ts ."
+    "manifest": "deno run --allow-read --allow-write --allow-run ../../../../scripts/generate-wasm-manifest.ts .",
+    "start:proxy": "python3 $(which emcc)/../tools/websocket_to_posix_proxy/websocket_to_posix_proxy.py"
   }
 }
