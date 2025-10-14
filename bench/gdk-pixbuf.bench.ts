@@ -1,12 +1,12 @@
 /**
- * ${LIB_TITLE} WASM Benchmarks
+ * GdkPixbuf WASM Benchmarks
  */
 
-import ${LIB_TITLE}WASM from "../src/lib/index.ts"
+import GdkPixbufWASM from "../src/lib/index.ts"
 
-Deno.bench("${LIB_NAME} initialization", {
+Deno.bench("gdk-pixbuf initialization", {
   baseline: true
 }, async () => {
-  const lib = new ${LIB_TITLE}WASM()
+  const lib = new GdkPixbufWASM()
   await lib.initialize()
 })
