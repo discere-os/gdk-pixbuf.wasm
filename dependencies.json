@@ -1,0 +1,61 @@
+{
+  "name": "gdk-pixbuf",
+  "version": "2.43.6",
+  "description": "GNOME image loading library compiled to WASM for Discere OS",
+  "dependencies": [
+    {
+      "name": "glib",
+      "version": "latest",
+      "url": "https://wasm.discere.cloud/glib/latest/glib-side.wasm",
+      "required": true,
+      "type": "side_module",
+      "description": "GLib core library providing fundamental data structures"
+    },
+    {
+      "name": "libpng",
+      "version": "latest",
+      "url": "https://wasm.discere.cloud/libpng/latest/libpng-side.wasm",
+      "required": true,
+      "type": "side_module",
+      "description": "PNG image format support"
+    },
+    {
+      "name": "libjpeg-turbo",
+      "version": "latest",
+      "url": "https://wasm.discere.cloud/libjpeg-turbo/latest/libjpeg-turbo-side.wasm",
+      "required": true,
+      "type": "side_module",
+      "description": "JPEG image format support (optimized)"
+    },
+    {
+      "name": "libtiff",
+      "version": "latest",
+      "url": "https://wasm.discere.cloud/libtiff/latest/libtiff-side.wasm",
+      "required": false,
+      "type": "side_module",
+      "description": "TIFF image format support"
+    },
+    {
+      "name": "libwebp",
+      "version": "latest",
+      "url": "https://wasm.discere.cloud/libwebp/latest/libwebp-side.wasm",
+      "required": false,
+      "type": "side_module",
+      "description": "WebP image format support"
+    },
+    {
+      "name": "zlib",
+      "version": "latest",
+      "url": "https://wasm.discere.cloud/zlib/latest/zlib-side.wasm",
+      "required": true,
+      "type": "side_module",
+      "description": "Compression library used by PNG and others"
+    }
+  ],
+  "build_info": {
+    "build_system": "meson",
+    "toolchain": "emscripten",
+    "target_platform": "wasm32-emscripten",
+    "minimum_browser": "Chrome/Edge 113+ (WebGPU + SIMD required)"
+  }
+}

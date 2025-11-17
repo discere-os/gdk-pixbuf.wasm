@@ -75,3 +75,26 @@ option('thumbnailer',
        description: 'Build the thumbnailer',
        type: 'feature',
        value: 'auto')
+
+# WASM-specific build options
+option('wasm_build_type',
+       description: 'WASM build variant (minimal, standard, webgpu)',
+       type: 'combo',
+       choices: ['minimal', 'standard', 'webgpu'],
+       value: 'standard')
+
+option('wasm_simd',
+       description: 'Enable WASM SIMD optimizations',
+       type: 'boolean',
+       value: true)
+
+option('wasm_threading',
+       description: 'Enable pthread support',
+       type: 'boolean',
+       value: true)
+
+option('wasm_optimize',
+       description: 'Optimization strategy',
+       type: 'combo',
+       choices: ['size', 'speed', 'balanced'],
+       value: 'balanced')
